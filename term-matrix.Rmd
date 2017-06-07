@@ -1,0 +1,355 @@
+Term Matrix Speed Contest
+=========================
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(comment = "", fig.height = 6, fig.width = 11.7,
+                      fig.retina = TRUE)
+options(width = 120, max.print = 100)
+library(ggplot2)
+theme_set(theme_gray(base_size = 18))
+```
+
+Overview
+--------
+
+There are multiple R packages that can transform text data into a
+matrix of term frequency counts. This document benchmarks five
+packages:
+
+ + [corpus](https://github.com/patperry/r-corpus)
+ + [quanteda](https://github.com/kbenoit/quanteda)
+ + [text2vec](http://text2vec.org/)
+ + [tidytext](https://github.com/juliasilge/tidytext)
+ + [tm](http://tm.r-forge.r-project.org/)
+
+There are two benchmarks, one for unigrams only, and one for unigrams and
+bigrams. In each benchmark, we perform the following sequence of operations:
+
+ + case fold the text
+ + tokenize into words
+ + remove puncuation
+ + remove numbers
+ + remove stop words
+ + stem
+ + compute bigrams (second benchmark only)
+ + compute term frequencies
+ + remove terms that appear fewer than five times in the corpus
+ + compute a term frequency matrix (text by term)
+ 
+There are some subtle and not-so-subtle differences in how the five packages
+implement these operations, so this is not really an apples-to-apples
+comparison, and the outputs are different. Keep that in mind.
+
+
+Prelude
+-------
+
+We will load the following packages.
+
+```{r}
+library("dplyr", warn.conflicts = FALSE)
+library("ggplot2")
+library("magrittr")
+library("methods")
+library("stringr")
+```
+
+The remaining packages need to be installed, but we will not load their
+namespaces:
+
+```{r}
+# Not run:
+# install.packages(c("corpus", "microbenchmark", "quanteda", "text2vec", "tidytext", "tm"))
+```
+
+For test data, we use the chapters from *Pride and Prejudice*, provided by
+the [janeaustenr](https://github.com/juliasilge/janeaustenr) library.
+
+```{r}
+lines <- (data_frame(text = janeaustenr::prideprejudice)
+          %>% mutate(
+    linenumber = row_number(),
+    chapter = cumsum(str_detect(text, regex("^chapter [\\divxlc]",
+                                            ignore_case = TRUE)))))
+text <- c(tapply(lines$text, lines$chapter, paste, collapse = "\n"))
+```
+
+We will use the Snowball English stop word list.
+```{r}
+stop_words <- corpus::stopwords("english")
+```
+
+
+Packages
+--------
+
+### corpus
+
+```{r}
+matrix_corpus <- function(text, bigrams = FALSE, min_count = 5)
+{
+    if (bigrams) {
+        ngrams <- 1:2
+    } else {
+        ngrams <- 1
+    }
+    f <- corpus::token_filter(stemmer = "english", drop_punct = TRUE,
+                              drop_number = TRUE, drop = stop_words)
+    stats <- corpus::term_counts(text, f, ngrams = ngrams, min = min_count)
+    x <- corpus::term_matrix(text, f, select = stats$term)
+    x
+}
+```
+
+
+### quanteda
+
+```{r}
+matrix_quanteda <- function(text, bigrams = FALSE, min_count = 5)
+{
+    if (bigrams) {
+        ngrams <- 1:2
+    } else {
+        ngrams <- 1
+    }
+    x <- quanteda:::dfm(text, stem = TRUE, remove_punct = TRUE,
+                       remove_numbers = TRUE, remove = stop_words,
+                       ngrams = ngrams, verbose = FALSE)
+    x <- quanteda::dfm_trim(x, min_count = min_count, verbose = FALSE)
+    x
+}
+```
+
+
+### text2vec
+
+```{r}
+# adapted from text2vec itoken documentation:
+stem_tokenizer <- function(x)
+{
+    text2vec::word_tokenizer(x) %>% lapply(SnowballC::wordStem, "en")
+}
+
+# Note: this filters punctuation but keeps numbers
+matrix_text2vec <- function(text, bigrams = FALSE, min_count = 5)
+{
+    if (bigrams) {
+        ngram <- c(1, 2)
+    } else {
+        ngram <- c(1, 1)
+    }
+    it_train <- text2vec::itoken(text,
+                                 preprocessor = tolower,
+                                 tokenizer = stem_tokenizer,
+                                 ids = seq_along(text),
+                                 progressbar = FALSE)
+    vocab <- text2vec::create_vocabulary(it_train, ngram = ngram,
+                                         stopwords = stop_words)
+    pruned_vocab <- text2vec::prune_vocabulary(vocab,
+                                               term_count_min = min_count)
+    vectorizer <- text2vec::vocab_vectorizer(pruned_vocab)
+    x <- text2vec::create_dtm(it_train, vectorizer)
+    x
+}
+```
+
+
+### tidytext
+
+```{r}
+# Note: this filters punctuation but keeps numbers
+matrix_tidytext <- function(text, bigrams = FALSE, min_count = 5)
+{
+    data <- tibble::tibble(text_id = seq_along(text), text = text)
+    stops <- tibble::tibble(word = stop_words)
+
+    x <- (data %>% tidytext::unnest_tokens(word, text)
+                %>% anti_join(stops, by = "word")
+                %>% mutate(word = SnowballC::wordStem(word, "english"))
+                %>% count(text_id, word)
+                %>% ungroup()
+                %>% tidytext::cast_dtm(text_id, word, n))
+    x <- x[, slam::col_sums(x) >= min_count, drop = FALSE]
+
+    if (bigrams) {
+        x2 <- (data %>% tidytext::unnest_tokens(bigram, text,
+                                                token = "ngrams", n = 2)
+                    %>% tidyr::separate(bigram, c("type1", "type2"), sep = " ")
+                    %>% filter(!type1 %in% stop_words,
+                               !type2 %in% stop_words)
+                    %>% mutate(type1 = SnowballC::wordStem(type1, "english"),
+                               type2 = SnowballC::wordStem(type2, "english"))
+                    %>% mutate(term = paste(type1, type2))
+                    %>% count(text_id, term)
+                    %>% ungroup()
+                    %>% tidytext::cast_dtm(text_id, term, n))
+        x2 <- x2[, slam::col_sums(x2) >= min_count, drop = FALSE]
+
+        x <- cbind(x, x2)
+    }
+
+    x
+}
+```
+
+
+### tm
+
+
+```{r}
+# from http://tm.r-forge.r-project.org/faq.html#Bigrams
+BigramTokenizer <- function(x)
+{
+    unlist(lapply(NLP::ngrams(NLP::words(x), 2), paste, collapse = " "),
+           use.names = FALSE)
+}
+
+matrix_tm <- function(text, bigrams = FALSE, min_count = 5)
+{
+    corpus <- (tm::VCorpus(tm::VectorSource(text))
+               %>% tm::tm_map(tm::content_transformer(tolower))
+               %>% tm::tm_map(tm::removeWords, stop_words)
+               %>% tm::tm_map(tm::removePunctuation)
+               %>% tm::tm_map(tm::removeNumbers)
+               %>% tm::tm_map(tm::stemDocument, language = "english"))
+
+    control <- list(wordLengths = c(1, Inf),
+                    bounds = list(global = c(min_count, Inf)))
+
+    x <- tm::DocumentTermMatrix(corpus, control = control)
+
+    if (bigrams) {
+        control$tokenize <- BigramTokenizer
+        x2 <- tm::DocumentTermMatrix(corpus, control = control)
+
+        x <- cbind(x, x2)
+    }
+    x
+}
+```
+
+
+Caveats
+-------
+
+These packages all give different results. See, for example, the results on
+the following sample text:
+
+```{r}
+sample <- "A sentence. Another sentence. Others..."
+as.matrix(matrix_corpus(sample, bigrams = TRUE, min_count = 1)) # corpus
+as.matrix(matrix_quanteda(sample, bigrams = TRUE, min_count = 1)) # quanteda
+as.matrix(matrix_text2vec(sample, bigrams = TRUE, min_count = 1)) # text2vec
+as.matrix(matrix_tidytext(sample, bigrams = TRUE, min_count = 1)) # tidytext
+as.matrix(matrix_tm(sample, bigrams = TRUE, min_count = 1)) # tm
+```
+
+Two major differences between the packages:
+
+ 1. With the *quanteda*, *tidytext*, and *tm* packages, we remove stop
+    words first, and then stem. With *text2vec*, we stem and then remove
+    stop words. *Corpus* removes stop words after stemming and by default
+    does not stem any words on the drop list. The word "other" is a stop
+    word, but "others" is not.  However, "others" stems to "other".
+    *Corpus* and *text2vec* remove "others"; *quanteda*, *tidytext*,
+    and *tm* replace "others" with a non-dropped "other" token.
+    Another example: "above" is a stop word that stems to "abov".
+    *Text2vec* replaces "above" with "abov" and keeps the token; the
+    other packages drop "above".
+
+ 2. By design, *corpus* does not form bigrams across dropped tokens, in
+    particular across dropped punctuation. The other packagages form
+    bigrams from "sentence. Another" and "sentence. Others"; corpus does
+    not.
+
+There are also differences in the output format. *Corpus*, *quanteda*,
+and *text2vec* return *Matrix* objects, but *tidytext* and *tm* return
+*slam* objects.
+
+
+Results
+-------
+
+### Unigrams
+
+Here are the results for the unigram benchmark.
+
+```{r}
+results1 <- microbenchmark::microbenchmark (
+    corpus = matrix_corpus(text, bigrams = FALSE),
+    quanteda = matrix_quanteda(text, bigrams = FALSE),
+    text2vec = matrix_text2vec(text, bigrams = FALSE),
+    tidytext = matrix_tidytext(text, bigrams = FALSE),
+    tm = matrix_tm(text, bigrams = FALSE),
+    times = 5)
+print(results1)
+(ggplot(summary(subset(results1)),
+        aes(x = expr, fill = expr, y = median, ymin = lq, ymax = uq))
+ + geom_bar(color = "white", stat = "identity")
+ + geom_errorbar()
+ + scale_fill_discrete(name = "Package")
+ + xlab("")
+ + ylab("Unigram computation time (less is better)"))
+```
+
+
+### Bigrams
+
+Here are the results for the bigram benchmark.
+
+
+```{r}
+results2 <- microbenchmark::microbenchmark (
+    corpus = matrix_corpus(text, bigrams = TRUE),
+    quanteda = matrix_quanteda(text, bigrams = TRUE),
+    text2vec = matrix_text2vec(text, bigrams = TRUE),
+    tidytext = matrix_tidytext(text, bigrams = TRUE),
+    tm = matrix_tm(text, bigrams = TRUE),
+    times = 5)
+print(results2)
+
+(ggplot(summary(results2),
+        aes(x = expr, fill = expr, y = median,
+            ymin = lq, ymax = uq))
+ + geom_bar(color = "white", stat = "identity")
+ + geom_errorbar()
+ + scale_fill_discrete(name = "Package")
+ + xlab("")
+ + ylab("Bigram computation time (less is better)"))
+```
+
+
+It's hard to see the differences on an absolute scale, so I'm including a plot
+on a log (base 10) scale:
+
+```{r}
+(ggplot(summary(results2),
+        aes(x = expr, fill = expr, y = log10(median),
+            ymin = log10(lq), ymax = log10(uq)))
+ + geom_bar(color = "white", stat = "identity")
+ + geom_errorbar()
+ + scale_fill_discrete(name = "Package")
+ + xlab("")
+ + ylab(expression(paste(Log[10],
+                         " Bigram computation time (less is better)"))))
+```
+
+
+Summary
+-------
+
+For the unigram benchmark, *corpus* is 3 times faster than *quanteda* and
+*tidytext*, and 10 times faster than *text2vec* and *tm*.
+
+For the bigram benchmark, *corpus* is 10 times faster than *text2vec* and
+*tidytext*, 20 times faster than *tm*, and 500 times faster than
+*quanteda*. (I'm not sure why the *quanteda* results are so bad, I
+might be doing something wrong.)
+
+
+Session information
+-------------------
+
+```{r}
+sessionInfo()
+```
