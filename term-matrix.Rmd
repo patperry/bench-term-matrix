@@ -23,7 +23,7 @@ packages:
  + [tidytext](https://github.com/juliasilge/tidytext)
  + [tm](http://tm.r-forge.r-project.org/)
 
-There are two benchmarks, one for unigrams only, and one for unigrams and
+There are four benchmarks, two for unigrams only, and two for unigrams and
 bigrams. In each benchmark, we perform the following sequence of operations:
 
  + case fold the text
@@ -32,7 +32,7 @@ bigrams. In each benchmark, we perform the following sequence of operations:
  + remove numbers
  + remove stop words
  + stem
- + compute bigrams (second benchmark only)
+ + compute bigrams (bigram benchmarks only)
  + compute term frequencies
  + remove terms that appear fewer than five times in the corpus
  + compute a term frequency matrix (text by term)
@@ -48,6 +48,7 @@ Prelude
 We will load the following packages.
 
 ```{r}
+library("Matrix")
 library("dplyr", warn.conflicts = FALSE)
 library("ggplot2")
 library("magrittr")
@@ -60,12 +61,13 @@ namespaces:
 
 ```{r}
 # Not run:
-# install.packages(c("corpus", "microbenchmark", "quanteda", "text2vec", "tidytext", "tm"))
+# install.packages(c("corpus", "microbenchmark", "quanteda", "tidytext", "tm"))
 # devtools::install_github("dselivanov/text2vec@5a778fb517082c4a4a69f84dd5e9d045a18bc0bf")
 ```
 
-For test data, we use the chapters from *Pride and Prejudice*, provided by
-the [janeaustenr](https://github.com/juliasilge/janeaustenr) library.
+For the first test corpus, we use the 62 chapters from *Pride and Prejudice*,
+provided by the
+[janeaustenr](https://github.com/juliasilge/janeaustenr) library:
 
 ```{r}
 lines <- (data_frame(text = janeaustenr::prideprejudice)
@@ -73,55 +75,79 @@ lines <- (data_frame(text = janeaustenr::prideprejudice)
     linenumber = row_number(),
     chapter = cumsum(str_detect(text, regex("^chapter [\\divxlc]",
                                             ignore_case = TRUE)))))
-text <- c(tapply(lines$text, lines$chapter, paste, collapse = "\n"))
+text_novel <- c(tapply(lines$text, lines$chapter, paste, collapse = "\n"))
 ```
 
-For alternative dataset with larger number of records we will take `movie_review` from text2vec package. It contains 5000 examples.
+For the second test corpus, we use the 5000 movie reviews provided by the
+*text2vec* package:
+
 ```{r}
-movie_review = text2vec::movie_review
-text2 = movie_review$review
-names(text2) = movie_review$id
+text_reviews <- text2vec::movie_review$review
+names(text_reviews) <- text2vec::movie_review$id
 ```
 
-We will use the Snowball English stop word list.
+We will use the Snowball English stop word list:
 ```{r}
 stop_words <- corpus::stopwords("english")
 ```
 
 
-Packages
---------
-### basic R
+Implementations
+---------------
 
-In order to make challenge little more interesting we will include pure R implementaion written from scratch:
+### Basic
+
+As a baseline, we will include a basic implementation, written from scratch by
+Dmitriy Selivanov (*text2vec* author) that can handle unigrams but not
+bigrams:
+
 ```{r}
-library(Matrix)
 
-# these 2 functions will be also used in text2vec
-stem_tokenizer <- function(x) {
-    stringr::str_split(x, boundary("word")) %>% lapply(SnowballC::wordStem, "en")
-}
-preprocess = function(x) {
-  stringr::str_to_lower(x) %>% 
-    str_replace_all("[^[:alpha:]\\s]", "")
+# helper function for normalizing text, also used by text2vec below
+preprocess <- function(x)
+{
+    # Note: this works fine for ASCII but not for general Unicode.
+    # For Unicode, do the following instead:
+    #
+    # (stringi::stri_trans_nfkc_casefold(x)
+    #  %>% stringi::stri_replace_all_regex("[^\\p{Letter}\\s]", ""))
+
+    str_to_lower(x) %>% str_replace_all("[^[:alpha:]\\s]", "")
 }
 
-matrix_basic_r = function(text, min_count = 5) {
-  ids = names(text)
-  tokens = text %>% preprocess %>% stem_tokenizer
-  doc_len = vapply(tokens, length, 0L)
-  tokens_flat = unlist(tokens, recursive = FALSE, use.names = FALSE)
-  terms = unique(tokens_flat)
-  terms = setdiff(terms, stop_words)
-  I = rep.int(seq_along(text), doc_len)
-  J = match(tokens_flat, terms)
-  sw_ind = is.na(J)
-  I = I[!sw_ind]
-  J = J[!sw_ind]
-  res = sparseMatrix(i = I, j = J, x = 1)
-  res[, Matrix::colSums(res) >= min_count]
+# helper function for tokenizing and stemming, also used by text2vec below
+stem_tokenizer <- function(x)
+{
+    str_split(x, boundary("word")) %>% lapply(SnowballC::wordStem, "english")
+}
+
+matrix_basic <- function(text, min_count = 5)
+{
+    # normalize and tokenize the text
+    toks <- text %>% preprocess %>% stem_tokenizer
+    toks_flat <- unlist(toks, recursive = FALSE, use.names = FALSE)
+
+    # compute the text lengths
+    ntok <- vapply(toks, length, 0L)
+
+    # compute the types, remove stop words
+    types <- unique(toks_flat) %>% setdiff(stop_words)
+
+    # construct the term matrix
+    i <- rep.int(seq_along(text), ntok)
+    j <- match(toks_flat, types)
+    drop <- is.na(j)
+    x <- sparseMatrix(i = i[!drop], j = j[!drop], x = 1,
+                      dims = c(length(text), length(types)),
+                      dimnames = list(names(text), types),
+                      check = FALSE)
+
+    # drop terms below the minimum count
+    x <- x[, colSums(x) >= min_count, drop = FALSE]
+    x
 }
 ```
+
 
 ### corpus
 
@@ -164,24 +190,27 @@ matrix_quanteda <- function(text, bigrams = FALSE, min_count = 5)
 ### text2vec
 
 ```{r}
+# Written by Dmitriy Selivanov
 matrix_text2vec <- function(text, bigrams = FALSE, min_count = 5)
 {
+    if (bigrams) {
+        ngram <- c(1, 2)
+    } else {
+        ngram <- c(1, 1)
+    }
+
+    # since we don't care about RAM usage we will tokenize everything only
+    # once and do it with a single call to preprocess and tokenizer
+    tokens <- preprocess(text) %>% stem_tokenizer
   
-  if (bigrams) {
-      ngram <- c(1, 2)
-  } else {
-      ngram <- c(1, 1)
-  }
-  # since we don't care about RAM usage we will tokenize everything only once 
-  # and do it with a single call to preprocess and tokenizer
-  tokens = preprocess(text) %>% stem_tokenizer
-  
-  it_train <- text2vec::itoken(tokens, n_chunks = 1, progressbar = FALSE)
-  vocab <- text2vec::create_vocabulary(it_train, ngram = ngram, stopwords = stop_words)
-  pruned_vocab <- text2vec::prune_vocabulary(vocab, term_count_min = min_count)
-  vectorizer <- text2vec::vocab_vectorizer(pruned_vocab)
-  x <- text2vec::create_dtm(it_train, vectorizer)
-  x
+    it_train <- text2vec::itoken(tokens, n_chunks = 1, progressbar = FALSE)
+    vocab <- text2vec::create_vocabulary(it_train, ngram = ngram,
+                                         stopwords = stop_words)
+    pruned_vocab <- text2vec::prune_vocabulary(vocab,
+                                               term_count_min = min_count)
+    vectorizer <- text2vec::vocab_vectorizer(pruned_vocab)
+    x <- text2vec::create_dtm(it_train, vectorizer)
+    x
 }
 ```
 
@@ -195,32 +224,40 @@ matrix_tidytext <- function(text, bigrams = FALSE, min_count = 5)
     data <- tibble::tibble(text_id = seq_along(text), text = text)
     stops <- tibble::tibble(word = stop_words)
 
-    x <- (data %>% tidytext::unnest_tokens(word, text)
-                %>% anti_join(stops, by = "word")
-                %>% mutate(word = SnowballC::wordStem(word, "english"))
-                %>% count(text_id, word)
-                %>% ungroup()
-                %>% tidytext::cast_dtm(text_id, word, n))
-    x <- x[, slam::col_sums(x) >= min_count, drop = FALSE]
+    # unigrams
+    freqs <- (data
+        %>% tidytext::unnest_tokens(word, text)
+        %>% anti_join(stops, by = "word")
+        %>% mutate(term = SnowballC::wordStem(word, "english"))
+        %>% count(text_id, term)
+        %>% ungroup())
 
-    if (bigrams) {
-        x2 <- (data %>% tidytext::unnest_tokens(bigram, text,
-                                                token = "ngrams", n = 2)
-                    %>% tidyr::separate(bigram, c("type1", "type2"), sep = " ")
-                    %>% filter(!type1 %in% stop_words,
-                               !type2 %in% stop_words)
-                    %>% mutate(type1 = SnowballC::wordStem(type1, "english"),
-                               type2 = SnowballC::wordStem(type2, "english"))
-                    %>% mutate(term = paste(type1, type2))
-                    %>% count(text_id, term)
-                    %>% ungroup()
-                    %>% tidytext::cast_dtm(text_id, term, n))
-        x2 <- x2[, slam::col_sums(x2) >= min_count, drop = FALSE]
+    # bigrams
+    if  (bigrams) {
+        freqs2 <- (data
+            %>% tidytext::unnest_tokens(bigram, text, token = "ngrams", n = 2)
+            %>% tidyr::separate(bigram, c("type1", "type2"), sep = " ")
+            %>% filter(!type1 %in% stop_words,
+                       !type2 %in% stop_words)
+            %>% mutate(type1 = SnowballC::wordStem(type1, "english"),
+                       type2 = SnowballC::wordStem(type2, "english"))
+            %>% mutate(term = paste(type1, type2))
+            %>% count(text_id, term)
+            %>% ungroup())
 
-        x <- cbind(x, x2)
+        freqs <- rbind(freqs, freqs2)
     }
 
-    sparseMatrix(i = x$i, j = x$j, x = x$v)
+    # form matrix in slam format
+    x <- freqs %>% tidytext::cast_dtm(text_id, term, n)
+
+    # remove rare terms
+    x <- x[, slam::col_sums(x) >= min_count, drop = FALSE]
+
+    # cast to dgCMatrix format
+    x <- sparseMatrix(i = x$i, j = x$j, x = x$v, dims = dim(x),
+                      dimnames = dimnames(x), check = FALSE)
+    x
 }
 ```
 
@@ -256,7 +293,10 @@ matrix_tm <- function(text, bigrams = FALSE, min_count = 5)
 
         x <- cbind(x, x2)
     }
-    sparseMatrix(i = x$i, j = x$j, x = x$v)
+
+    x <- sparseMatrix(i = x$i, j = x$j, x = x$v, dims = dim(x),
+                      dimnames = dimnames(x), check = FALSE)
+    x
 }
 ```
 
@@ -264,21 +304,45 @@ matrix_tm <- function(text, bigrams = FALSE, min_count = 5)
 Caveats
 -------
 
-These packages all give different results. See, for example, the results on
-the following sample text:
+These implementations all give different results. See, for example, the
+results on the following sample text:
 
 ```{r}
-sample <- "A sentence. Another sentence. Others..."
-as.matrix(matrix_corpus(sample, bigrams = TRUE, min_count = 1)) # corpus
-as.matrix(matrix_quanteda(sample, bigrams = TRUE, min_count = 1)) # quanteda
-as.matrix(matrix_text2vec(sample, bigrams = TRUE, min_count = 1)) # text2vec
-as.matrix(matrix_tidytext(sample, bigrams = TRUE, min_count = 1)) # tidytext
-as.matrix(matrix_tm(sample, bigrams = TRUE, min_count = 1)) # tm
+sample <- "Above ground. Another sentence. Others..."
+
+# compute term matrices using five implementations
+xs <- list(
+    corpus   = matrix_corpus(sample, bigrams = TRUE, min_count = 1),
+    quanteda = matrix_quanteda(sample, bigrams = TRUE, min_count = 1),
+    text2vec = matrix_text2vec(sample, bigrams = TRUE, min_count = 1),
+    tidytext = matrix_tidytext(sample, bigrams = TRUE, min_count = 1),
+    tm       = matrix_tm(sample, bigrams = TRUE, min_count = 1))
+
+# normalize the names (some use '_' to join bigrams, others use ' ')
+for (i in seq_along(xs)) {
+    colnames(xs[[i]]) <- str_replace_all(colnames(xs[[i]]), " ", "_")
+}
+
+# get the unique terms
+terms <- unique(c(sapply(xs, colnames), recursive = TRUE))
+
+# put unigrams before bigrams, then order lexicographically
+terms <- terms[order(str_count(terms, "_"), terms)]
+
+# combine everything into a single matrix
+x <- matrix(0, length(xs), length(terms), dimnames = list(names(xs), terms))
+for (i in seq_along(xs)) {
+    xi <- xs[[i]]
+    x[i, colnames(xi)] <- as.numeric(xi[1, ])
+}
+
+print(as(x, "dgCMatrix"))
+print(sample)
 ```
 
-Two major differences between the packages:
+Some major differences between the implementations:
 
- 1. With the *quanteda*, *tidytext*, and *tm* packages, we remove stop
+ 1. With the *quanteda*, *tidytext*, and *tm* implementations, we remove stop
     words first, and then stem. With *text2vec*, we stem and then remove
     stop words. *Corpus* removes stop words after stemming and by default
     does not stem any words on the drop list. The word "other" is a stop
@@ -291,144 +355,94 @@ Two major differences between the packages:
 
  2. By design, *corpus* does not form bigrams across dropped tokens, in
     particular across dropped punctuation. The other packagages form
-    bigrams from "sentence. Another" and "sentence. Others"; corpus does
+    bigrams from "ground. Another" and "sentence. Others"; corpus does
     not.
 
-There are also differences in the output format. *Corpus*, *quanteda*,
-and *text2vec* return *Matrix* objects, but *tidytext* and *tm* return
-*slam* objects.
+There are also differences in how the packages handle numbers and punctuation.
+Beyond that, there are differences in the default output formats, but we have
+converted everything to the *Matrix* `"dgCMatrix"` format to make the outputs
+comparable. (By default, *corpus*, *quanteda*, and *text2vec* return *Matrix*
+objects, but *tidytext* and *tm* return *slam* objects.)
 
 
 Results
 -------
 
-### Unigrams
+# Benchmarking
+
+First we benchmark the implementations:
+
+```{r}
+make_bench <- function(name, text, bigrams)
+{
+    if (!bigrams) {
+        results <- microbenchmark::microbenchmark (
+            basic = matrix_basic(text),
+            corpus = matrix_corpus(text, bigrams = FALSE),
+            quanteda = matrix_quanteda(text, bigrams = FALSE),
+            text2vec = matrix_text2vec(text, bigrams = FALSE),
+            tidytext = matrix_tidytext(text, bigrams = FALSE),
+            tm = matrix_tm(text, bigrams = FALSE),
+        times = 5)
+    } else {
+        results <- microbenchmark::microbenchmark (
+            corpus = matrix_corpus(text, bigrams = FALSE),
+            # quanteda = matrix_quanteda(text, bigrams = FALSE),
+            text2vec = matrix_text2vec(text, bigrams = FALSE),
+            tidytext = matrix_tidytext(text, bigrams = FALSE),
+            tm = matrix_tm(text, bigrams = FALSE),
+        times = 5)
+    }
+    list(name = name, results = results)
+}
+
+plot_bench <- function(bench, title)
+{
+    (ggplot(summary(bench$results),
+            aes(x = expr, fill = expr, y = median, ymin = lq, ymax = uq))
+     + geom_bar(color = "white", stat = "identity")
+     + geom_errorbar()
+     + scale_fill_discrete(name = "Implementation")
+     + xlab("")
+     + ylab("Computation time (less is better)")
+     + ggtitle(bench$name))
+}
+```
+
+### Unigrams (novel)
 
 Here are the results for the unigram benchmark.
 
-Short data:
-
 ```{r}
-TXT = text
-results1 <- microbenchmark::microbenchmark (
-    basic = matrix_basic_r(TXT),
-    corpus = matrix_corpus(TXT, bigrams = FALSE),
-    quanteda = matrix_quanteda(TXT, bigrams = FALSE),
-    text2vec = matrix_text2vec(TXT, bigrams = FALSE),
-    tidytext = matrix_tidytext(TXT, bigrams = FALSE),
-    tm = matrix_tm(TXT, bigrams = FALSE),
-    times = 5)
-print(results1)
-(ggplot(summary(subset(results1)),
-        aes(x = expr, fill = expr, y = median, ymin = lq, ymax = uq))
- + geom_bar(color = "white", stat = "identity")
- + geom_errorbar()
- + scale_fill_discrete(name = "Package")
- + xlab("")
- + ylab("Unigram computation time (less is better)"))
-```
-Long data:
-```{r}
-TXT = text2
-results1 <- microbenchmark::microbenchmark (
-    basic = matrix_basic_r(TXT),
-    # FIXME - uncomment after corpus will be fixed
-    # corpus = matrix_corpus(TXT, bigrams = FALSE),
-    quanteda = matrix_quanteda(TXT, bigrams = FALSE),
-    text2vec = matrix_text2vec(TXT, bigrams = FALSE),
-    tidytext = matrix_tidytext(TXT, bigrams = FALSE),
-    tm = matrix_tm(TXT, bigrams = FALSE),
-    times = 5)
-print(results1)
-(ggplot(summary(subset(results1)),
-        aes(x = expr, fill = expr, y = median, ymin = lq, ymax = uq))
- + geom_bar(color = "white", stat = "identity")
- + geom_errorbar()
- + scale_fill_discrete(name = "Package")
- + xlab("")
- + ylab("Unigram computation time (less is better)"))
+bench1 <- make_bench("Unigram, Novel", text_novel, bigrams = FALSE)
+plot_bench(bench1)
+print(bench1$results)
 ```
 
-### Bigrams
+### Unigrams (reviews)
 
-Here are the results for the bigram benchmark.
-
-Short data:
 ```{r}
-TXT = text
-results2_short <- microbenchmark::microbenchmark (
-    corpus = matrix_corpus(TXT, bigrams = TRUE),
-    # FIXME - uncomment after quanteda will be fixed
-    # quanteda = matrix_quanteda(TXT, bigrams = TRUE),
-    text2vec = matrix_text2vec(TXT, bigrams = TRUE),
-    tidytext = matrix_tidytext(TXT, bigrams = TRUE),
-    tm = matrix_tm(TXT, bigrams = TRUE),
-    times = 5)
-print(results2_short)
-
-(ggplot(summary(results2_short),
-        aes(x = expr, fill = expr, y = median,
-            ymin = lq, ymax = uq))
- + geom_bar(color = "white", stat = "identity")
- + geom_errorbar()
- + scale_fill_discrete(name = "Package")
- + xlab("")
- + ylab("Bigram computation time (less is better)"))
-```
-Long data:
-```{r}
-TXT = text2
-results2_long <- microbenchmark::microbenchmark (
-    # FIXME - uncomment after corpus will be fixed
-    # corpus = matrix_corpus(TXT, bigrams = TRUE),
-    # FIXME - uncomment after quanteda will be fixed
-    # quanteda = matrix_quanteda(TXT, bigrams = TRUE),
-    text2vec = matrix_text2vec(TXT, bigrams = TRUE),
-    # FIXME - uncomment after tidytext will be fixed
-    # weird error - Error in f(init, x[[i]]) : Numbers of rows of matrices must match.
-    # tidytext = matrix_tidytext(TXT, bigrams = TRUE),
-    tm = matrix_tm(TXT, bigrams = TRUE),
-    times = 5)
-print(results2_long)
-
-(ggplot(summary(results2_long),
-        aes(x = expr, fill = expr, y = median,
-            ymin = lq, ymax = uq))
- + geom_bar(color = "white", stat = "identity")
- + geom_errorbar()
- + scale_fill_discrete(name = "Package")
- + xlab("")
- + ylab("Bigram computation time (less is better)"))
+bench2 <- make_bench("Unigram, Reviews", text_reviews, bigrams = FALSE)
+plot_bench(bench2)
+print(bench2$results)
 ```
 
 
-It's hard to see the differences on an absolute scale, so I'm including a plot
-on a log (base 10) scale:
+### Bigrams (novel)
 
 ```{r}
-(ggplot(summary(results2_short),
-        aes(x = expr, fill = expr, y = median, ymin = lq, ymax = uq))
- + geom_bar(color = "white", stat = "identity")
- + geom_errorbar()
- + scale_fill_discrete(name = "Package")
- + scale_y_log10()
- + xlab("")
- + ylab(expression(paste(Log[10],
-                         " Bigram computation time (less is better)"))))
+bench3 <- make_bench("Bigram, Novel", text_novel, bigrams = TRUE)
+plot_bench(bench3)
+print(bench3$results)
 ```
+
+### Bigrams (reviews)
 
 ```{r}
-(ggplot(summary(results2_long),
-        aes(x = expr, fill = expr, y = median, ymin = lq, ymax = uq))
- + geom_bar(color = "white", stat = "identity")
- + geom_errorbar()
- + scale_fill_discrete(name = "Package")
- + scale_y_log10()
- + xlab("")
- + ylab(expression(paste(Log[10],
-                         " Bigram computation time (less is better)"))))
+bench4 <- make_bench("Bigram, Reviews", text_reviews, bigrams = TRUE)
+plot_bench(bench4)
+print(bench4$results)
 ```
-
 
 Summary
 -------
