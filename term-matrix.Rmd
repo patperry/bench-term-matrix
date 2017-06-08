@@ -7,6 +7,7 @@ knitr::opts_chunk$set(comment = "", fig.height = 6, fig.width = 11.7,
 options(width = 120, max.print = 100)
 library(ggplot2)
 theme_set(theme_gray(base_size = 18))
+library(quanteda); quanteda_options(threads = 1)
 ```
 
 Overview
@@ -60,6 +61,7 @@ namespaces:
 ```{r}
 # Not run:
 # install.packages(c("corpus", "microbenchmark", "quanteda", "text2vec", "tidytext", "tm"))
+# devtools::install_github("dselivanov/text2vec@5a778fb517082c4a4a69f84dd5e9d045a18bc0bf")
 ```
 
 For test data, we use the chapters from *Pride and Prejudice*, provided by
@@ -74,6 +76,13 @@ lines <- (data_frame(text = janeaustenr::prideprejudice)
 text <- c(tapply(lines$text, lines$chapter, paste, collapse = "\n"))
 ```
 
+For alternative dataset with larger number of records we will take `movie_review` from text2vec package. It contains 5000 examples.
+```{r}
+movie_review = text2vec::movie_review
+text2 = movie_review$review
+names(text2) = movie_review$id
+```
+
 We will use the Snowball English stop word list.
 ```{r}
 stop_words <- corpus::stopwords("english")
@@ -82,6 +91,37 @@ stop_words <- corpus::stopwords("english")
 
 Packages
 --------
+### basic R
+
+In order to make challenge little more interesting we will include pure R implementaion written from scratch:
+```{r}
+library(Matrix)
+
+# these 2 functions will be also used in text2vec
+stem_tokenizer <- function(x) {
+    stringr::str_split(x, boundary("word")) %>% lapply(SnowballC::wordStem, "en")
+}
+preprocess = function(x) {
+  stringr::str_to_lower(x) %>% 
+    str_replace_all("[^[:alpha:]\\s]", "")
+}
+
+matrix_basic_r = function(text, min_count = 5) {
+  ids = names(text)
+  tokens = text %>% preprocess %>% stem_tokenizer
+  doc_len = vapply(tokens, length, 0L)
+  tokens_flat = unlist(tokens, recursive = FALSE, use.names = FALSE)
+  terms = unique(tokens_flat)
+  terms = setdiff(terms, stop_words)
+  I = rep.int(seq_along(text), doc_len)
+  J = match(tokens_flat, terms)
+  sw_ind = is.na(J)
+  I = I[!sw_ind]
+  J = J[!sw_ind]
+  res = sparseMatrix(i = I, j = J, x = 1)
+  res[, Matrix::colSums(res) >= min_count]
+}
+```
 
 ### corpus
 
@@ -124,32 +164,24 @@ matrix_quanteda <- function(text, bigrams = FALSE, min_count = 5)
 ### text2vec
 
 ```{r}
-# adapted from text2vec itoken documentation:
-stem_tokenizer <- function(x)
-{
-    text2vec::word_tokenizer(x) %>% lapply(SnowballC::wordStem, "en")
-}
-
-# Note: this filters punctuation but keeps numbers
 matrix_text2vec <- function(text, bigrams = FALSE, min_count = 5)
 {
-    if (bigrams) {
-        ngram <- c(1, 2)
-    } else {
-        ngram <- c(1, 1)
-    }
-    it_train <- text2vec::itoken(text,
-                                 preprocessor = tolower,
-                                 tokenizer = stem_tokenizer,
-                                 ids = seq_along(text),
-                                 progressbar = FALSE)
-    vocab <- text2vec::create_vocabulary(it_train, ngram = ngram,
-                                         stopwords = stop_words)
-    pruned_vocab <- text2vec::prune_vocabulary(vocab,
-                                               term_count_min = min_count)
-    vectorizer <- text2vec::vocab_vectorizer(pruned_vocab)
-    x <- text2vec::create_dtm(it_train, vectorizer)
-    x
+  
+  if (bigrams) {
+      ngram <- c(1, 2)
+  } else {
+      ngram <- c(1, 1)
+  }
+  # since we don't care about RAM usage we will tokenize everything only once 
+  # and do it with a single call to preprocess and tokenizer
+  tokens = preprocess(text) %>% stem_tokenizer
+  
+  it_train <- text2vec::itoken(tokens, n_chunks = 1, progressbar = FALSE)
+  vocab <- text2vec::create_vocabulary(it_train, ngram = ngram, stopwords = stop_words)
+  pruned_vocab <- text2vec::prune_vocabulary(vocab, term_count_min = min_count)
+  vectorizer <- text2vec::vocab_vectorizer(pruned_vocab)
+  x <- text2vec::create_dtm(it_train, vectorizer)
+  x
 }
 ```
 
@@ -188,7 +220,7 @@ matrix_tidytext <- function(text, bigrams = FALSE, min_count = 5)
         x <- cbind(x, x2)
     }
 
-    x
+    sparseMatrix(i = x$i, j = x$j, x = x$v)
 }
 ```
 
@@ -224,7 +256,7 @@ matrix_tm <- function(text, bigrams = FALSE, min_count = 5)
 
         x <- cbind(x, x2)
     }
-    x
+    sparseMatrix(i = x$i, j = x$j, x = x$v)
 }
 ```
 
@@ -274,13 +306,38 @@ Results
 
 Here are the results for the unigram benchmark.
 
+Short data:
+
 ```{r}
+TXT = text
 results1 <- microbenchmark::microbenchmark (
-    corpus = matrix_corpus(text, bigrams = FALSE),
-    quanteda = matrix_quanteda(text, bigrams = FALSE),
-    text2vec = matrix_text2vec(text, bigrams = FALSE),
-    tidytext = matrix_tidytext(text, bigrams = FALSE),
-    tm = matrix_tm(text, bigrams = FALSE),
+    basic = matrix_basic_r(TXT),
+    corpus = matrix_corpus(TXT, bigrams = FALSE),
+    quanteda = matrix_quanteda(TXT, bigrams = FALSE),
+    text2vec = matrix_text2vec(TXT, bigrams = FALSE),
+    tidytext = matrix_tidytext(TXT, bigrams = FALSE),
+    tm = matrix_tm(TXT, bigrams = FALSE),
+    times = 5)
+print(results1)
+(ggplot(summary(subset(results1)),
+        aes(x = expr, fill = expr, y = median, ymin = lq, ymax = uq))
+ + geom_bar(color = "white", stat = "identity")
+ + geom_errorbar()
+ + scale_fill_discrete(name = "Package")
+ + xlab("")
+ + ylab("Unigram computation time (less is better)"))
+```
+Long data:
+```{r}
+TXT = text2
+results1 <- microbenchmark::microbenchmark (
+    basic = matrix_basic_r(TXT),
+    # FIXME - uncomment after corpus will be fixed
+    # corpus = matrix_corpus(TXT, bigrams = FALSE),
+    quanteda = matrix_quanteda(TXT, bigrams = FALSE),
+    text2vec = matrix_text2vec(TXT, bigrams = FALSE),
+    tidytext = matrix_tidytext(TXT, bigrams = FALSE),
+    tm = matrix_tm(TXT, bigrams = FALSE),
     times = 5)
 print(results1)
 (ggplot(summary(subset(results1)),
@@ -292,23 +349,49 @@ print(results1)
  + ylab("Unigram computation time (less is better)"))
 ```
 
-
 ### Bigrams
 
 Here are the results for the bigram benchmark.
 
-
+Short data:
 ```{r}
-results2 <- microbenchmark::microbenchmark (
-    corpus = matrix_corpus(text, bigrams = TRUE),
-    quanteda = matrix_quanteda(text, bigrams = TRUE),
-    text2vec = matrix_text2vec(text, bigrams = TRUE),
-    tidytext = matrix_tidytext(text, bigrams = TRUE),
-    tm = matrix_tm(text, bigrams = TRUE),
+TXT = text
+results2_short <- microbenchmark::microbenchmark (
+    corpus = matrix_corpus(TXT, bigrams = TRUE),
+    # FIXME - uncomment after quanteda will be fixed
+    # quanteda = matrix_quanteda(TXT, bigrams = TRUE),
+    text2vec = matrix_text2vec(TXT, bigrams = TRUE),
+    tidytext = matrix_tidytext(TXT, bigrams = TRUE),
+    tm = matrix_tm(TXT, bigrams = TRUE),
     times = 5)
-print(results2)
+print(results2_short)
 
-(ggplot(summary(results2),
+(ggplot(summary(results2_short),
+        aes(x = expr, fill = expr, y = median,
+            ymin = lq, ymax = uq))
+ + geom_bar(color = "white", stat = "identity")
+ + geom_errorbar()
+ + scale_fill_discrete(name = "Package")
+ + xlab("")
+ + ylab("Bigram computation time (less is better)"))
+```
+Long data:
+```{r}
+TXT = text2
+results2_long <- microbenchmark::microbenchmark (
+    # FIXME - uncomment after corpus will be fixed
+    # corpus = matrix_corpus(TXT, bigrams = TRUE),
+    # FIXME - uncomment after quanteda will be fixed
+    # quanteda = matrix_quanteda(TXT, bigrams = TRUE),
+    text2vec = matrix_text2vec(TXT, bigrams = TRUE),
+    # FIXME - uncomment after tidytext will be fixed
+    # weird error - Error in f(init, x[[i]]) : Numbers of rows of matrices must match.
+    # tidytext = matrix_tidytext(TXT, bigrams = TRUE),
+    tm = matrix_tm(TXT, bigrams = TRUE),
+    times = 5)
+print(results2_long)
+
+(ggplot(summary(results2_long),
         aes(x = expr, fill = expr, y = median,
             ymin = lq, ymax = uq))
  + geom_bar(color = "white", stat = "identity")
@@ -323,12 +406,24 @@ It's hard to see the differences on an absolute scale, so I'm including a plot
 on a log (base 10) scale:
 
 ```{r}
-(ggplot(summary(results2),
-        aes(x = expr, fill = expr, y = log10(median),
-            ymin = log10(lq), ymax = log10(uq)))
+(ggplot(summary(results2_short),
+        aes(x = expr, fill = expr, y = median, ymin = lq, ymax = uq))
  + geom_bar(color = "white", stat = "identity")
  + geom_errorbar()
  + scale_fill_discrete(name = "Package")
+ + scale_y_log10()
+ + xlab("")
+ + ylab(expression(paste(Log[10],
+                         " Bigram computation time (less is better)"))))
+```
+
+```{r}
+(ggplot(summary(results2_long),
+        aes(x = expr, fill = expr, y = median, ymin = lq, ymax = uq))
+ + geom_bar(color = "white", stat = "identity")
+ + geom_errorbar()
+ + scale_fill_discrete(name = "Package")
+ + scale_y_log10()
  + xlab("")
  + ylab(expression(paste(Log[10],
                          " Bigram computation time (less is better)"))))
@@ -338,11 +433,11 @@ on a log (base 10) scale:
 Summary
 -------
 
-For the unigram benchmark, *corpus* is 3 times faster than *quanteda* and
-*tidytext*, and 10 times faster than *text2vec* and *tm*.
+For the unigram benchmark, *corpus* is XXX times faster than *quanteda* and
+*tidytext*, and XXX times faster than *text2vec* and *tm*.
 
-For the bigram benchmark, *corpus* is 10 times faster than *text2vec* and
-*tidytext*, 20 times faster than *tm*, and 500 times faster than
+For the bigram benchmark, *corpus* is XXX times faster than *text2vec* and
+*tidytext*, XXX times faster than *tm*, and XXX times faster than
 *quanteda*. (I'm not sure why the *quanteda* results are so bad, I
 might be doing something wrong.)
 
