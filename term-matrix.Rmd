@@ -61,7 +61,8 @@ namespaces:
 
 ```{r}
 # Not run:
-# install.packages(c("corpus", "microbenchmark", "quanteda", "tidytext", "tm"))
+# install.packages(c("microbenchmark", "quanteda", "tidytext", "tm"))
+# install.packages("https://github.com/patperry/r-corpus/raw/master/dist/corpus_0.6.1.tar.gz", repos = NULL) 
 # devtools::install_github("dselivanov/text2vec@5a778fb517082c4a4a69f84dd5e9d045a18bc0bf")
 ```
 
