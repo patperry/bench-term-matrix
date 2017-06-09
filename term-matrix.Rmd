@@ -1,5 +1,5 @@
-Term Matrix Speed Contest
-=========================
+Term Matrix Comparison
+======================
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 knitr::opts_chunk$set(comment = "", fig.height = 6, fig.width = 11.7,
@@ -60,9 +60,11 @@ The remaining packages need to be installed, but we will not load their
 namespaces:
 
 ```{r}
+# Note: we use development versions of corpus and text2vec
+#
 # Not run:
 # install.packages(c("microbenchmark", "quanteda", "tidytext", "tm"))
-# install.packages("https://github.com/patperry/r-corpus/raw/master/dist/corpus_0.6.1.tar.gz", repos = NULL) 
+# install.packages("http://ptrckprry.com/dist/corpus_0.6.1.tar.gz", repos = NULL)
 # devtools::install_github("dselivanov/text2vec@5a778fb517082c4a4a69f84dd5e9d045a18bc0bf")
 ```
 
@@ -369,7 +371,7 @@ objects, but *tidytext* and *tm* return *slam* objects.)
 Results
 -------
 
-# Benchmarking
+### Setup
 
 First we benchmark the implementations:
 
@@ -405,20 +407,21 @@ plot_bench <- function(bench, title)
      + geom_errorbar()
      + scale_fill_discrete(name = "Implementation")
      + xlab("")
-     + ylab("Computation time (less is better)")
-     + ggtitle(bench$name))
+     + ylab("Computation time (less is better)"))
 }
 ```
 
-### Unigrams (novel)
+Next, we present the results for the four benchmarks.
 
-Here are the results for the unigram benchmark.
+
+### Unigrams (novel)
 
 ```{r}
 bench1 <- make_bench("Unigram, Novel", text_novel, bigrams = FALSE)
 plot_bench(bench1)
 print(bench1$results)
 ```
+
 
 ### Unigrams (reviews)
 
@@ -448,13 +451,25 @@ print(bench4$results)
 Summary
 -------
 
-For the unigram benchmark, *corpus* is XXX times faster than *quanteda* and
-*tidytext*, and XXX times faster than *text2vec* and *tm*.
+*Corpus* is faster than the other packages, by at least a factor of 2 and as
+much as a factor of 10. What's going on here? The other packages tokenize the
+text into a list of character vectors, then the process the token lists to
+form the term matrices. *Corpus* instead bypasses the intermediate step, going
+directly from the text to the term matrix without constructing an intermediate
+"tokens" object. This is only possible because all of the *corpus*
+normalization and tokenization is written directly in C.
 
-For the bigram benchmark, *corpus* is XXX times faster than *text2vec* and
-*tidytext*, XXX times faster than *tm*, and XXX times faster than
-*quanteda*. (I'm not sure why the *quanteda* results are so bad, I
-might be doing something wrong.)
+The downside of the *corpus* approach is flexibility: if you're using
+*corpus*, you can't swap out the normalization or tokenizer for something
+custom. With varying degrees of ease, the other packages let you swap out
+these steps for your own custom functions.
+
+Of course, there's more to text minining than just term matrices, so if you
+need more, than *corpus* alone probably won't be sufficient for you. The other
+packages have different strengths: *quanteda* and *text2vec* provide a host of
+models and metrics; *tidytext* fits in well with "tidy data" pipelines built
+on *dplyr* and related tools; *tm* has lots of extension packages for data
+input and modeling. Choose the package that best needs your needs.
 
 
 Session information

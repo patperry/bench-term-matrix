@@ -1,5 +1,5 @@
-Term Matrix Speed Contest
-=========================
+Term Matrix Comparison
+======================
 
 Overview
 --------
@@ -48,8 +48,11 @@ We will load the following packages.
 The remaining packages need to be installed, but we will not load their
 namespaces:
 
+    # Note: we use development versions of corpus and text2vec
+    #
     # Not run:
-    # install.packages(c("corpus", "microbenchmark", "quanteda", "tidytext", "tm"))
+    # install.packages(c("microbenchmark", "quanteda", "tidytext", "tm"))
+    # install.packages("http://ptrckprry.com/dist/corpus_0.6.1.tar.gz", repos = NULL)
     # devtools::install_github("dselivanov/text2vec@5a778fb517082c4a4a69f84dd5e9d045a18bc0bf")
 
 For the first test corpus, we use the 62 chapters from *Pride and
@@ -340,8 +343,7 @@ format to make the outputs comparable. (By default, *corpus*,
 Results
 -------
 
-Benchmarking
-============
+### Setup
 
 First we benchmark the implementations:
 
@@ -376,13 +378,12 @@ First we benchmark the implementations:
          + geom_errorbar()
          + scale_fill_discrete(name = "Implementation")
          + xlab("")
-         + ylab("Computation time (less is better)")
-         + ggtitle(bench$name))
+         + ylab("Computation time (less is better)"))
     }
 
-### Unigrams (novel)
+Next, we present the results for the four benchmarks.
 
-Here are the results for the unigram benchmark.
+### Unigrams (novel)
 
     bench1 <- make_bench("Unigram, Novel", text_novel, bigrams = FALSE)
     plot_bench(bench1)
@@ -392,13 +393,13 @@ Here are the results for the unigram benchmark.
     print(bench1$results)
 
     Unit: milliseconds
-         expr       min        lq     mean    median        uq       max neval
-        basic 101.13288 102.55804 107.9119 102.56064 111.88778 121.42000     5
-       corpus  58.87905  61.83502  62.8533  62.33309  63.86401  67.35533     5
-     quanteda 178.85502 181.43078 193.2470 188.28113 199.61232 218.05590     5
-     text2vec 140.47182 143.01431 145.5353 143.92851 146.47036 153.79135     5
-     tidytext 182.57987 184.55774 193.8767 190.56820 203.87556 207.80198     5
-           tm 752.25011 764.93509 769.1492 767.53095 770.81812 790.21157     5
+         expr       min        lq      mean    median        uq       max neval
+        basic  88.46239  89.21237  95.10896  96.57821  98.41184 102.87999     5
+       corpus  53.73993  54.84012  56.51806  55.81677  58.01989  60.17357     5
+     quanteda 159.83338 171.82806 173.30478 172.41935 176.50080 185.94231     5
+     text2vec 125.83513 126.37634 130.03419 127.05638 131.80838 139.09470     5
+     tidytext 162.02670 164.85393 166.32145 165.14694 165.43863 174.14103     5
+           tm 671.49093 672.86341 686.08866 688.03163 690.40507 707.65225     5
 
 ### Unigrams (reviews)
 
@@ -410,13 +411,13 @@ Here are the results for the unigram benchmark.
     print(bench2$results)
 
     Unit: milliseconds
-         expr       min        lq       mean     median         uq       max neval
-        basic  1374.404  1406.362  1443.6213  1410.4529  1468.5566  1558.331     5
-       corpus   703.989   726.493   810.7916   730.7652   885.4084  1007.303     5
-     quanteda  2806.766  2839.959  2915.6428  2853.7576  3018.3484  3059.382     5
-     text2vec  1612.376  1693.712  1783.3554  1769.2229  1808.4424  2033.024     5
-     tidytext  3083.031  3214.575  3201.4127  3216.6035  3220.6664  3272.188     5
-           tm 11746.069 11859.511 11981.0084 11983.8261 12130.4581 12185.178     5
+         expr       min         lq       mean     median         uq       max neval
+        basic  1075.151  1217.0158  1208.6943  1229.9848  1243.3716  1277.948     5
+       corpus   573.300   589.6264   622.4914   594.3842   600.5013   754.645     5
+     quanteda  2503.592  2644.0713  2653.9059  2654.5620  2694.4647  2772.840     5
+     text2vec  1486.742  1512.2268  1592.8287  1635.7343  1658.5590  1670.881     5
+     tidytext  2531.436  2564.6896  2686.1778  2589.2875  2853.5589  2891.917     5
+           tm 10345.837 10381.9448 10475.3198 10417.0597 10514.2843 10717.473     5
 
 ### Bigrams (novel)
 
@@ -428,11 +429,11 @@ Here are the results for the unigram benchmark.
     print(bench3$results)
 
     Unit: milliseconds
-         expr       min        lq      mean    median        uq       max neval
-       corpus  60.81974  61.01333  67.11814  63.19383  63.91547  86.64834     5
-     text2vec 138.17122 138.41417 143.29222 140.16983 141.10628 158.59960     5
-     tidytext 184.08899 186.24348 187.57584 186.80816 187.24252 193.49606     5
-           tm 742.19861 748.65740 760.81999 751.22847 765.80397 796.21150     5
+         expr       min        lq      mean   median        uq       max neval
+       corpus  53.51586  53.87717  55.73634  56.6040  57.26115  57.42354     5
+     text2vec 122.00369 122.30648 128.70145 123.4749 126.56974 149.15247     5
+     tidytext 161.34145 163.89736 167.32260 165.2932 166.81682 179.26416     5
+           tm 676.37400 677.12523 683.43653 677.6396 677.80179 708.24206     5
 
 ### Bigrams (reviews)
 
@@ -444,22 +445,36 @@ Here are the results for the unigram benchmark.
     print(bench4$results)
 
     Unit: milliseconds
-         expr        min         lq       mean     median         uq       max neval
-       corpus   710.1978   728.9021   774.5114   744.8876   780.2198   908.350     5
-     text2vec  1691.2152  1733.3193  1744.9154  1735.6952  1744.1087  1820.238     5
-     tidytext  2861.1330  3084.7137  3144.9873  3120.7921  3324.4264  3333.871     5
-           tm 11926.8157 12050.6010 12104.1836 12062.4539 12101.4721 12379.575     5
+         expr        min         lq       mean     median         uq        max neval
+       corpus   583.2059   583.3029   625.9486   586.3741   624.8133   752.0469     5
+     text2vec  1420.7615  1541.1279  1615.6645  1697.5674  1702.8373  1716.0283     5
+     tidytext  2544.4322  2696.1891  2713.4625  2718.3700  2735.4106  2872.9104     5
+           tm 10400.8167 10453.3668 10500.8931 10500.1645 10551.3051 10598.8123     5
 
 Summary
 -------
 
-For the unigram benchmark, *corpus* is XXX times faster than *quanteda*
-and *tidytext*, and XXX times faster than *text2vec* and *tm*.
+*Corpus* is faster than the other packages, by at least a factor of 2
+and as much as a factor of 10. What's going on here? The other packages
+tokenize the text into a list of character vectors, then the process the
+token lists to form the term matrices. *Corpus* instead bypasses the
+intermediate step, going directly from the text to the term matrix
+without constructing an intermediate "tokens" object. This is only
+possible because all of the *corpus* normalization and tokenization is
+written directly in C.
 
-For the bigram benchmark, *corpus* is XXX times faster than *text2vec*
-and *tidytext*, XXX times faster than *tm*, and XXX times faster than
-*quanteda*. (I'm not sure why the *quanteda* results are so bad, I might
-be doing something wrong.)
+The downside of the *corpus* approach is flexibility: if you're using
+*corpus*, you can't swap out the normalization or tokenizer for
+something custom. With varying degrees of ease, the other packages let
+you swap out these steps for your own custom functions.
+
+Of course, there's more to text minining than just term matrices, so if
+you need more, than *corpus* alone probably won't be sufficient for you.
+The other packages have different strengths: *quanteda* and *text2vec*
+provide a host of models and metrics; *tidytext* fits in well with "tidy
+data" pipelines built on *dplyr* and related tools; *tm* has lots of
+extension packages for data input and modeling. Choose the package that
+best needs your needs.
 
 Session information
 -------------------
