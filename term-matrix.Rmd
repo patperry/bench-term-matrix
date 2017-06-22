@@ -41,6 +41,11 @@ There are some subtle and not-so-subtle differences in how the five packages
 implement these operations, so this is not really an apples-to-apples
 comparison, and the outputs are different. Keep that in mind.
 
+*Note: For quanteda, we only benchmark unigram computations; quanteda can
+compute bigrams, but in its current implementation (0.9.9.65) it is orders
+of magnitude slower than the other packages. The quanteda authors are working
+on fixing the issue.*
+
 
 Prelude
 -------
@@ -390,6 +395,7 @@ make_bench <- function(name, text, bigrams)
     } else {
         results <- microbenchmark::microbenchmark (
             corpus = matrix_corpus(text, bigrams = FALSE),
+            # exclude quanteda; see note above
             # quanteda = matrix_quanteda(text, bigrams = FALSE),
             text2vec = matrix_text2vec(text, bigrams = FALSE),
             tidytext = matrix_tidytext(text, bigrams = FALSE),
@@ -464,7 +470,7 @@ The downside of the *corpus* approach is flexibility: if you're using
 custom. With varying degrees of ease, the other packages let you swap out
 these steps for your own custom functions.
 
-Of course, there's more to text minining than just term matrices, so if you
+Of course, there's more to text mining than just term matrices, so if you
 need more, than *corpus* alone probably won't be sufficient for you. The other
 packages have different strengths: *quanteda* and *text2vec* provide a host of
 models and metrics; *tidytext* fits in well with "tidy data" pipelines built
