@@ -48,11 +48,10 @@ We will load the following packages.
 The remaining packages need to be installed, but we will not load their
 namespaces:
 
-    # Note: we use development versions of corpus and text2vec
+    # Note: we use a development versions of text2vec
     #
     # Not run:
-    # install.packages(c("microbenchmark", "quanteda", "tidytext", "tm"))
-    # install.packages("http://ptrckprry.com/dist/corpus_0.6.1.tar.gz", repos = NULL)
+    # install.packages(c("corpus", "microbenchmark", "quanteda", "tidytext", "tm"))
     # devtools::install_github("dselivanov/text2vec@5a778fb517082c4a4a69f84dd5e9d045a18bc0bf")
 
 For the first test corpus, we use the 62 chapters from *Pride and
@@ -140,7 +139,8 @@ unigrams but not bigrams:
         }
         f <- corpus::token_filter(stemmer = "english", drop_punct = TRUE,
                                   drop_number = TRUE, drop = stop_words)
-        stats <- corpus::term_counts(text, f, ngrams = ngrams, min = min_count)
+        stats <- corpus::term_counts(text, f, ngrams = ngrams,
+                                     min_count = min_count)
         x <- corpus::term_matrix(text, f, select = stats$term)
         x
     }
@@ -393,13 +393,13 @@ Next, we present the results for the four benchmarks.
     print(bench1$results)
 
     Unit: milliseconds
-         expr       min        lq      mean    median        uq       max neval
-        basic  88.46239  89.21237  95.10896  96.57821  98.41184 102.87999     5
-       corpus  53.73993  54.84012  56.51806  55.81677  58.01989  60.17357     5
-     quanteda 159.83338 171.82806 173.30478 172.41935 176.50080 185.94231     5
-     text2vec 125.83513 126.37634 130.03419 127.05638 131.80838 139.09470     5
-     tidytext 162.02670 164.85393 166.32145 165.14694 165.43863 174.14103     5
-           tm 671.49093 672.86341 686.08866 688.03163 690.40507 707.65225     5
+         expr       min        lq     mean    median        uq      max neval
+        basic  89.53498  95.82908 106.5431  96.71177  99.34882 151.2908     5
+       corpus  68.03241  68.98661  90.2887  76.14655  81.51476 156.7631     5
+     quanteda 154.06562 164.14880 179.1695 169.24797 180.05291 228.3322     5
+     text2vec 128.76574 130.97956 134.9654 137.79620 138.53920 138.7465     5
+     tidytext 162.37039 162.89691 185.8774 179.47793 192.76505 231.8766     5
+           tm 676.52099 713.08554 714.3480 720.94074 724.81737 736.3752     5
 
 ### Unigrams (reviews)
 
@@ -411,13 +411,13 @@ Next, we present the results for the four benchmarks.
     print(bench2$results)
 
     Unit: milliseconds
-         expr       min         lq       mean     median         uq       max neval
-        basic  1075.151  1217.0158  1208.6943  1229.9848  1243.3716  1277.948     5
-       corpus   573.300   589.6264   622.4914   594.3842   600.5013   754.645     5
-     quanteda  2503.592  2644.0713  2653.9059  2654.5620  2694.4647  2772.840     5
-     text2vec  1486.742  1512.2268  1592.8287  1635.7343  1658.5590  1670.881     5
-     tidytext  2531.436  2564.6896  2686.1778  2589.2875  2853.5589  2891.917     5
-           tm 10345.837 10381.9448 10475.3198 10417.0597 10514.2843 10717.473     5
+         expr        min         lq       mean     median        uq        max neval
+        basic  1086.5726  1279.9442  1273.5961  1303.7451  1310.902  1386.8163     5
+       corpus   699.6055   720.2039   744.0902   750.8419   769.842   779.9578     5
+     quanteda  2635.6067  2743.9400  2805.4253  2819.5896  2864.675  2963.3148     5
+     text2vec  1522.0380  1571.7102  1608.8052  1580.9192  1622.431  1746.9278     5
+     tidytext  2840.4053  2890.6245  2968.3323  2987.8290  2992.953  3129.8498     5
+           tm 10519.6174 10988.0952 11073.4739 11198.7255 11326.692 11334.2390     5
 
 ### Bigrams (novel)
 
@@ -429,11 +429,11 @@ Next, we present the results for the four benchmarks.
     print(bench3$results)
 
     Unit: milliseconds
-         expr       min        lq      mean   median        uq       max neval
-       corpus  53.51586  53.87717  55.73634  56.6040  57.26115  57.42354     5
-     text2vec 122.00369 122.30648 128.70145 123.4749 126.56974 149.15247     5
-     tidytext 161.34145 163.89736 167.32260 165.2932 166.81682 179.26416     5
-           tm 676.37400 677.12523 683.43653 677.6396 677.80179 708.24206     5
+         expr       min        lq      mean    median       uq       max neval
+       corpus  67.28631  69.74695  75.41903  74.39687  78.4762  87.18883     5
+     text2vec 130.67648 131.97450 145.33998 132.93969 144.8866 186.22266     5
+     tidytext 190.65293 194.74266 197.20206 195.37390 198.9658 206.27505     5
+           tm 691.86198 703.20665 757.04183 704.98177 788.8686 896.29020     5
 
 ### Bigrams (reviews)
 
@@ -445,11 +445,11 @@ Next, we present the results for the four benchmarks.
     print(bench4$results)
 
     Unit: milliseconds
-         expr        min         lq       mean     median         uq        max neval
-       corpus   583.2059   583.3029   625.9486   586.3741   624.8133   752.0469     5
-     text2vec  1420.7615  1541.1279  1615.6645  1697.5674  1702.8373  1716.0283     5
-     tidytext  2544.4322  2696.1891  2713.4625  2718.3700  2735.4106  2872.9104     5
-           tm 10400.8167 10453.3668 10500.8931 10500.1645 10551.3051 10598.8123     5
+         expr        min         lq      mean     median         uq        max neval
+       corpus   687.5056   746.9445   784.191   785.6219   819.1792   881.7039     5
+     text2vec  1572.0105  1574.1451  1652.493  1632.7921  1735.5433  1747.9762     5
+     tidytext  2798.0161  2865.7393  2901.237  2915.9908  2932.8095  2993.6278     5
+           tm 10636.4576 10799.5699 10874.963 10892.1622 10894.3806 11152.2446     5
 
 Summary
 -------
@@ -506,6 +506,6 @@ Session information
     [21] knitr_1.16             text2vec_0.5.0         rprojroot_1.2          grid_3.4.0             data.table_1.10.4     
     [26] R6_2.2.1               foreign_0.8-67         rmarkdown_1.5          purrr_0.2.2.2          tidyr_0.6.3           
     [31] reshape2_1.4.2         backports_1.0.5        scales_0.4.1           codetools_0.2-15       SnowballC_0.5.1       
-    [36] htmltools_0.3.6        corpus_0.6.1           mnormt_1.5-5           assertthat_0.2.0       tidytext_0.1.2        
+    [36] htmltools_0.3.6        corpus_0.7.0           mnormt_1.5-5           assertthat_0.2.0       tidytext_0.1.2        
     [41] colorspace_1.3-2       labeling_0.3           stringi_1.1.5          RcppParallel_4.3.20    lazyeval_0.2.0        
     [46] munsell_0.4.3          slam_0.1-40            tm_0.7-1               broom_0.4.2

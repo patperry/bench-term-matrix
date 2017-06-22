@@ -60,11 +60,10 @@ The remaining packages need to be installed, but we will not load their
 namespaces:
 
 ```{r}
-# Note: we use development versions of corpus and text2vec
+# Note: we use a development versions of text2vec
 #
 # Not run:
-# install.packages(c("microbenchmark", "quanteda", "tidytext", "tm"))
-# install.packages("http://ptrckprry.com/dist/corpus_0.6.1.tar.gz", repos = NULL)
+# install.packages(c("corpus", "microbenchmark", "quanteda", "tidytext", "tm"))
 # devtools::install_github("dselivanov/text2vec@5a778fb517082c4a4a69f84dd5e9d045a18bc0bf")
 ```
 
@@ -164,7 +163,8 @@ matrix_corpus <- function(text, bigrams = FALSE, min_count = 5)
     }
     f <- corpus::token_filter(stemmer = "english", drop_punct = TRUE,
                               drop_number = TRUE, drop = stop_words)
-    stats <- corpus::term_counts(text, f, ngrams = ngrams, min = min_count)
+    stats <- corpus::term_counts(text, f, ngrams = ngrams,
+                                 min_count = min_count)
     x <- corpus::term_matrix(text, f, select = stats$term)
     x
 }
