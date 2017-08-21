@@ -19,7 +19,7 @@ operations:
 
 -   case fold the text
 -   tokenize into words
--   remove puncuation
+-   remove punctuation
 -   remove numbers
 -   remove stop words
 -   stem
@@ -32,11 +32,6 @@ There are some subtle and not-so-subtle differences in how the five
 packages implement these operations, so this is not really an
 apples-to-apples comparison, and the outputs are different. Keep that in
 mind.
-
-*Note: For quanteda, we only benchmark unigram computations; quanteda
-can compute bigrams, but in its current implementation (0.9.9.65) it is
-orders of magnitude slower than the other packages. The quanteda authors
-are working on fixing the issue.*
 
 Prelude
 -------
@@ -53,11 +48,12 @@ We will load the following packages.
 The remaining packages need to be installed, but we will not load their
 namespaces:
 
-    # Note: we use a development versions of text2vec
+    # Note: we use a development versions of corpus, installed
+    # by following the instructions at
+    # https://github.com/patperry/r-corpus#building-from-source
     #
     # Not run:
-    # install.packages(c("corpus", "microbenchmark", "quanteda", "tidytext", "tm"))
-    # devtools::install_github("dselivanov/text2vec@5a778fb517082c4a4a69f84dd5e9d045a18bc0bf")
+    # install.packages(c("microbenchmark", "quanteda", "text2vec", "tidytext", "tm"))
 
 For the first test corpus, we use the 62 chapters from *Pride and
 Prejudice*, provided by the
@@ -142,10 +138,10 @@ unigrams but not bigrams:
         } else {
             ngrams <- 1
         }
-        f <- corpus::token_filter(stemmer = "english", drop_punct = TRUE,
-                                  drop_number = TRUE, drop = stop_words)
-        stats <- corpus::term_counts(text, f, ngrams = ngrams,
-                                     min_count = min_count)
+        f <- corpus::text_filter(stemmer = "english", drop_punct = TRUE,
+                                 drop_number = TRUE, drop = stop_words)
+        stats <- corpus::term_stats(text, f, ngrams = ngrams,
+                                    min_count = min_count)
         x <- corpus::term_matrix(text, f, select = stats$term)
         x
     }
@@ -159,7 +155,7 @@ unigrams but not bigrams:
         } else {
             ngrams <- 1
         }
-        x <- quanteda:::dfm(text, stem = TRUE, remove_punct = TRUE,
+        x <- quanteda::dfm(text, stem = TRUE, remove_punct = TRUE,
                            remove_numbers = TRUE, remove = stop_words,
                            ngrams = ngrams, verbose = FALSE)
         x <- quanteda::dfm_trim(x, min_count = min_count, verbose = FALSE)
@@ -286,8 +282,6 @@ results on the following sample text:
         tidytext = matrix_tidytext(sample, bigrams = TRUE, min_count = 1),
         tm       = matrix_tm(sample, bigrams = TRUE, min_count = 1))
 
-    No features removed.
-
     # normalize the names (some use '_' to join bigrams, others use ' ')
     for (i in seq_along(xs)) {
         colnames(xs[[i]]) <- str_replace_all(colnames(xs[[i]]), " ", "_")
@@ -311,7 +305,7 @@ results on the following sample text:
     5 x 9 sparse Matrix of class "dgCMatrix"
              abov anoth ground other sentenc abov_ground anoth_sentenc ground_anoth sentenc_other
     corpus      .     1      1     .       1           .             1            .             .
-    quanteda    .     1      1     1       1           .             1            1             1
+    quanteda    .     1      1     1       1           1             1            1             1
     text2vec    1     1      1     .       1           1             1            1             .
     tidytext    .     1      1     1       1           .             1            1             1
     tm          .     1      1     1       1           .             1            1             1
@@ -362,17 +356,17 @@ First we benchmark the implementations:
                 text2vec = matrix_text2vec(text, bigrams = FALSE),
                 tidytext = matrix_tidytext(text, bigrams = FALSE),
                 tm = matrix_tm(text, bigrams = FALSE),
-            times = 5)
+                times = 5)
         } else {
             results <- microbenchmark::microbenchmark (
-                corpus = matrix_corpus(text, bigrams = FALSE),
-                # exclude quanteda; see note above
-                # quanteda = matrix_quanteda(text, bigrams = FALSE),
-                text2vec = matrix_text2vec(text, bigrams = FALSE),
-                tidytext = matrix_tidytext(text, bigrams = FALSE),
-                tm = matrix_tm(text, bigrams = FALSE),
-            times = 5)
+                corpus = matrix_corpus(text, bigrams = TRUE),
+                quanteda = matrix_quanteda(text, bigrams = TRUE),
+                text2vec = matrix_text2vec(text, bigrams = TRUE),
+                tidytext = matrix_tidytext(text, bigrams = TRUE),
+                tm = matrix_tm(text, bigrams = TRUE),
+                times = 5)
         }
+
         list(name = name, results = results)
     }
 
@@ -399,13 +393,13 @@ Next, we present the results for the four benchmarks.
     print(bench1$results)
 
     Unit: milliseconds
-         expr       min        lq      mean    median        uq      max neval
-        basic  94.12127 111.55741 117.22329 115.39522 131.64480 133.3977     5
-       corpus  63.98705  68.92664  74.50796  69.68685  84.86687  85.0724     5
-     quanteda 169.88761 170.85599 192.41053 179.91193 191.87491 249.5222     5
-     text2vec 124.11152 128.37635 147.93219 129.34434 146.34805 211.4807     5
-     tidytext 161.76963 171.45061 191.36297 181.49958 215.04633 227.0487     5
-           tm 711.39060 740.77539 742.84116 748.28904 754.62344 759.1273     5
+         expr       min        lq      mean   median        uq       max neval
+        basic  89.95256  92.14857 105.82787 105.4601 118.35586 123.22230     5
+       corpus  67.88736  68.00299  72.71438  68.2012  76.66693  82.81344     5
+     quanteda 169.15080 173.34062 179.43663 177.6169 179.69622 197.37859     5
+     text2vec 125.17750 127.44258 132.88344 128.5781 130.04000 153.17898     5
+     tidytext 173.78775 176.47121 186.89969 178.1253 197.31312 208.80111     5
+           tm 684.84074 687.54222 691.65563 687.6326 692.39192 705.87074     5
 
 ### Unigrams (reviews)
 
@@ -417,13 +411,13 @@ Next, we present the results for the four benchmarks.
     print(bench2$results)
 
     Unit: milliseconds
-         expr        min         lq       mean    median         uq        max neval
-        basic  1084.9638  1165.4240  1294.0746  1236.335  1309.0316  1674.6182     5
-       corpus   651.6232   663.5181   669.8379   672.396   680.1314   681.5206     5
-     quanteda  2205.0992  2492.3904  2467.2541  2524.220  2545.1039  2569.4572     5
-     text2vec  1462.4463  1470.3672  1549.7900  1538.160  1619.7885  1658.1881     5
-     tidytext  2765.0679  2991.4207  2962.7001  2992.006  3010.8807  3054.1255     5
-           tm 10124.3488 10224.0273 10982.8941 10821.844 11390.3560 12353.8940     5
+         expr        min         lq       mean     median         uq        max neval
+        basic  1041.9600  1260.0894  1310.9323  1269.2078  1415.8655  1567.5389     5
+       corpus   728.9617   734.2605   825.1777   780.5213   932.7459   949.3989     5
+     quanteda  2721.0763  2808.6665  2877.4857  2842.2347  2989.4144  3026.0365     5
+     text2vec  1542.2544  1555.8159  1683.9892  1565.6625  1603.5334  2152.6797     5
+     tidytext  3008.3909  3037.8763  3157.5544  3117.0764  3170.6102  3453.8183     5
+           tm 10787.6874 10875.7651 11817.5059 10993.2838 13136.4888 13294.3043     5
 
 ### Bigrams (novel)
 
@@ -435,11 +429,12 @@ Next, we present the results for the four benchmarks.
     print(bench3$results)
 
     Unit: milliseconds
-         expr       min        lq      mean    median        uq       max neval
-       corpus  63.35596  64.23826  64.61024  64.58966  64.82431  66.04303     5
-     text2vec 121.56959 123.47913 129.72582 123.50721 128.23036 151.84280     5
-     tidytext 162.54288 168.31266 172.85007 169.81904 178.07108 185.50468     5
-           tm 665.27105 667.79071 674.17955 671.88004 676.06751 689.88844     5
+         expr        min         lq       mean     median         uq        max neval
+       corpus   78.47289   78.50051   80.92065   82.51431   82.55469   82.56085     5
+     quanteda 2017.87454 2038.97487 2157.33919 2199.38437 2222.40093 2308.06125     5
+     text2vec  202.36722  204.97548  213.29986  205.29699  207.20550  246.65413     5
+     tidytext  641.90621  681.32893  682.90659  689.73203  698.40658  703.15921     5
+           tm 1329.63315 1337.25640 1363.83871 1359.52149 1377.54832 1415.23422     5
 
 ### Bigrams (reviews)
 
@@ -450,12 +445,13 @@ Next, we present the results for the four benchmarks.
 
     print(bench4$results)
 
-    Unit: milliseconds
-         expr        min         lq       mean     median         uq        max neval
-       corpus   673.8201   678.5507   699.0681   697.7502   701.1378   744.0816     5
-     text2vec  1417.0564  1445.0288  1518.7429  1471.3448  1586.5963  1673.6884     5
-     tidytext  2639.8434  2812.3845  2852.0940  2863.3091  2886.5256  3058.4073     5
-           tm 10220.6120 10230.9296 10599.6401 10344.5138 10523.1756 11678.9697     5
+    Unit: seconds
+         expr       min        lq      mean    median        uq       max neval
+       corpus  1.016665  1.088087  1.136768  1.111102  1.207830  1.260154     5
+     quanteda 23.579375 23.780355 24.756739 24.694733 25.161024 26.568208     5
+     text2vec  2.686002  2.755716  3.050985  2.846913  3.017942  3.948349     5
+     tidytext 12.528027 12.581825 12.926033 12.837822 13.308036 13.374454     5
+           tm 21.080682 21.931901 22.073406 22.208548 22.461196 22.684704     5
 
 Summary
 -------
@@ -502,16 +498,18 @@ Session information
     [1] methods   stats     graphics  grDevices utils     datasets  base     
 
     other attached packages:
-    [1] stringr_1.2.0     magrittr_1.5      dplyr_0.5.0       Matrix_1.2-9      quanteda_0.9.9-65 ggplot2_2.2.1    
+    [1] bindrcpp_0.2  stringr_1.2.0 magrittr_1.5  dplyr_0.7.2   Matrix_1.2-9  quanteda_0.99 ggplot2_2.2.1
 
     loaded via a namespace (and not attached):
-     [1] NLP_0.1-10             Rcpp_0.12.11           compiler_3.4.0         plyr_1.8.4             tokenizers_0.1.4      
-     [6] iterators_1.0.8        tools_3.4.0            digest_0.6.12          nlme_3.1-131           evaluate_0.10         
-    [11] tibble_1.3.0           gtable_0.2.0           lattice_0.20-35        psych_1.7.5            fastmatch_1.1-0       
-    [16] foreach_1.4.3          DBI_0.6-1              microbenchmark_1.4-2.1 parallel_3.4.0         janeaustenr_0.1.4     
-    [21] knitr_1.16             text2vec_0.5.0         rprojroot_1.2          grid_3.4.0             data.table_1.10.4     
-    [26] R6_2.2.1               foreign_0.8-67         rmarkdown_1.5          purrr_0.2.2.2          tidyr_0.6.3           
-    [31] reshape2_1.4.2         backports_1.0.5        scales_0.4.1           codetools_0.2-15       SnowballC_0.5.1       
-    [36] htmltools_0.3.6        corpus_0.7.0           mnormt_1.5-5           assertthat_0.2.0       tidytext_0.1.3        
-    [41] colorspace_1.3-2       labeling_0.3           stringi_1.1.5          RcppParallel_4.3.20    lazyeval_0.2.0        
-    [46] munsell_0.4.3          slam_0.1-40            tm_0.7-1               broom_0.4.2
+     [1] slam_0.1-40            NLP_0.1-10             reshape2_1.4.2         purrr_0.2.2.2          lattice_0.20-35       
+     [6] colorspace_1.3-2       htmltools_0.3.6        SnowballC_0.5.1        tidytext_0.1.3         rlang_0.1.1           
+    [11] foreign_0.8-67         glue_1.1.1             lambda.r_1.1.9         text2vec_0.5.0         foreach_1.4.3         
+    [16] bindr_0.1              plyr_1.8.4             munsell_0.4.3          gtable_0.2.0           futile.logger_1.4.3   
+    [21] codetools_0.2-15       psych_1.7.5            evaluate_0.10          labeling_0.3           knitr_1.16            
+    [26] tm_0.7-1               parallel_3.4.0         broom_0.4.2            tokenizers_0.1.4       Rcpp_0.12.12          
+    [31] scales_0.4.1           backports_1.0.5        corpus_0.9.1.9000      RcppParallel_4.3.20    microbenchmark_1.4-2.1
+    [36] fastmatch_1.1-0        mnormt_1.5-5           digest_0.6.12          stringi_1.1.5          grid_3.4.0            
+    [41] rprojroot_1.2          tools_3.4.0            lazyeval_0.2.0         tibble_1.3.3           janeaustenr_0.1.4     
+    [46] futile.options_1.0.0   tidyr_0.6.3            pkgconfig_2.0.1        data.table_1.10.4      lubridate_1.6.0       
+    [51] assertthat_0.2.0       rmarkdown_1.5          iterators_1.0.8        R6_2.2.2               nlme_3.1-131          
+    [56] compiler_3.4.0

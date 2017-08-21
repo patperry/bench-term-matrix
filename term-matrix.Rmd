@@ -28,7 +28,7 @@ bigrams. In each benchmark, we perform the following sequence of operations:
 
  + case fold the text
  + tokenize into words
- + remove puncuation
+ + remove punctuation
  + remove numbers
  + remove stop words
  + stem
@@ -41,10 +41,6 @@ There are some subtle and not-so-subtle differences in how the five packages
 implement these operations, so this is not really an apples-to-apples
 comparison, and the outputs are different. Keep that in mind.
 
-*Note: For quanteda, we only benchmark unigram computations; quanteda can
-compute bigrams, but in its current implementation (0.9.9.65) it is orders
-of magnitude slower than the other packages. The quanteda authors are working
-on fixing the issue.*
 
 
 Prelude
@@ -65,11 +61,12 @@ The remaining packages need to be installed, but we will not load their
 namespaces:
 
 ```{r}
-# Note: we use a development versions of text2vec
+# Note: we use a development versions of corpus, installed
+# by following the instructions at
+# https://github.com/patperry/r-corpus#building-from-source
 #
 # Not run:
-# install.packages(c("corpus", "microbenchmark", "quanteda", "tidytext", "tm"))
-# devtools::install_github("dselivanov/text2vec@5a778fb517082c4a4a69f84dd5e9d045a18bc0bf")
+# install.packages(c("microbenchmark", "quanteda", "text2vec", "tidytext", "tm"))
 ```
 
 For the first test corpus, we use the 62 chapters from *Pride and Prejudice*,
@@ -166,10 +163,10 @@ matrix_corpus <- function(text, bigrams = FALSE, min_count = 5)
     } else {
         ngrams <- 1
     }
-    f <- corpus::token_filter(stemmer = "english", drop_punct = TRUE,
-                              drop_number = TRUE, drop = stop_words)
-    stats <- corpus::term_counts(text, f, ngrams = ngrams,
-                                 min_count = min_count)
+    f <- corpus::text_filter(stemmer = "english", drop_punct = TRUE,
+                             drop_number = TRUE, drop = stop_words)
+    stats <- corpus::term_stats(text, f, ngrams = ngrams,
+                                min_count = min_count)
     x <- corpus::term_matrix(text, f, select = stats$term)
     x
 }
@@ -186,7 +183,7 @@ matrix_quanteda <- function(text, bigrams = FALSE, min_count = 5)
     } else {
         ngrams <- 1
     }
-    x <- quanteda:::dfm(text, stem = TRUE, remove_punct = TRUE,
+    x <- quanteda::dfm(text, stem = TRUE, remove_punct = TRUE,
                        remove_numbers = TRUE, remove = stop_words,
                        ngrams = ngrams, verbose = FALSE)
     x <- quanteda::dfm_trim(x, min_count = min_count, verbose = FALSE)
@@ -391,17 +388,17 @@ make_bench <- function(name, text, bigrams)
             text2vec = matrix_text2vec(text, bigrams = FALSE),
             tidytext = matrix_tidytext(text, bigrams = FALSE),
             tm = matrix_tm(text, bigrams = FALSE),
-        times = 5)
+            times = 5)
     } else {
         results <- microbenchmark::microbenchmark (
-            corpus = matrix_corpus(text, bigrams = FALSE),
-            # exclude quanteda; see note above
-            # quanteda = matrix_quanteda(text, bigrams = FALSE),
-            text2vec = matrix_text2vec(text, bigrams = FALSE),
-            tidytext = matrix_tidytext(text, bigrams = FALSE),
-            tm = matrix_tm(text, bigrams = FALSE),
-        times = 5)
+            corpus = matrix_corpus(text, bigrams = TRUE),
+            quanteda = matrix_quanteda(text, bigrams = TRUE),
+            text2vec = matrix_text2vec(text, bigrams = TRUE),
+            tidytext = matrix_tidytext(text, bigrams = TRUE),
+            tm = matrix_tm(text, bigrams = TRUE),
+            times = 5)
     }
+
     list(name = name, results = results)
 }
 
