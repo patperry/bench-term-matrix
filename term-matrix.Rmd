@@ -61,12 +61,8 @@ The remaining packages need to be installed, but we will not load their
 namespaces:
 
 ```{r}
-# Note: we use a development versions of corpus, installed
-# by following the instructions at
-# https://github.com/patperry/r-corpus#building-from-source
-#
 # Not run:
-# install.packages(c("microbenchmark", "quanteda", "text2vec", "tidytext", "tm"))
+# install.packages(c("microbenchmark", "corpus", "quanteda", "text2vec", "tidytext", "tm"))
 ```
 
 For the first test corpus, we use the 62 chapters from *Pride and Prejudice*,
@@ -92,7 +88,7 @@ names(text_reviews) <- text2vec::movie_review$id
 
 We will use the Snowball English stop word list:
 ```{r}
-stop_words <- corpus::stopwords("english")
+stop_words <- corpus::stopwords_en
 ```
 
 
@@ -163,7 +159,7 @@ matrix_corpus <- function(text, bigrams = FALSE, min_count = 5)
     } else {
         ngrams <- 1
     }
-    f <- corpus::text_filter(stemmer = "english", drop_punct = TRUE,
+    f <- corpus::text_filter(stemmer = "en", drop_punct = TRUE,
                              drop_number = TRUE, drop = stop_words)
     stats <- corpus::term_stats(text, f, ngrams = ngrams,
                                 min_count = min_count)
